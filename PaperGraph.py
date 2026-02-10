@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-PaperGraph Pro v3.1 (Restored UI & Pro Features)
+PaperGraph Studio v3.3 (Fixed Tabs & Duplicate Error)
 """
 
 import streamlit as st
@@ -48,6 +48,7 @@ st.markdown("""
     .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
         border: 1px solid #ccc !important;
         background-color: #f9f9f9 !important;
+        color: #333 !important; /* スマホで見えるように文字色を黒に固定 */
     }
 
     /* 2. ファイルアップロードの枠（縦に大きく・青枠維持） */
@@ -140,7 +141,7 @@ def load_config_cloud(email, name):
 
 # --- ログイン画面 ---
 def show_login_page():
-    st.header("PaperGraphStudio")
+    st.header("PaperGraph Studio")
     if st.button("🚀 登録せずにゲストとして利用する", type="secondary", use_container_width=True):
         st.session_state.logged_in = True
         st.session_state.is_guest = True
@@ -199,7 +200,6 @@ def create_figure(line_configs, config_dict):
         ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(n=config_dict.get("minor_div_y", 2)))
 
     f_tick = config_dict.get("f_size_tick", 10)
-    # 表示設定に従って目盛りとラベルを制御
     ax.tick_params(axis='x', which='both', bottom=config_dict.get("show_xt", True), labelbottom=config_dict.get("show_xl", True), labelsize=f_tick, pad=config_dict.get("tick_pad", 3.5))
     ax.tick_params(axis='y', which='both', left=config_dict.get("show_ytl", True), labelleft=config_dict.get("show_yll", True), labelsize=f_tick, pad=config_dict.get("tick_pad", 3.5))
     if ax2: ax2.tick_params(axis='y', which='both', right=config_dict.get("show_ytr", True), labelright=config_dict.get("show_ylr", True), labelsize=f_tick, pad=config_dict.get("tick_pad", 3.5))
@@ -224,10 +224,8 @@ def create_figure(line_configs, config_dict):
             except: pass
         
         m_face = config["color"] if (config["m_info"] and config["m_info"].get("fill")=="full") else "white"
-        # 凡例ラベルは「線」か「プロット」どちらかが有効な場合のみ設定
         lbl = config["label"] if (config["linestyle"]!="None" or config["marker"]!="None") else None
         
-        # エラーバー、線、プロットの描画分け
         if config.get("show_err") and config.get("err_data") is not None:
              target_ax.errorbar(x_d, y_d, yerr=config["err_data"], label=lbl, color=config["color"], linewidth=config["lw"], linestyle=config["linestyle"], marker=config["marker"], markersize=config["m_size"], markerfacecolor=m_face, markeredgecolor=config["color"], capsize=3.0, ecolor=config["color"], zorder=10)
         else:
@@ -265,9 +263,7 @@ def create_figure(line_configs, config_dict):
     return fig
 
 # --- メインアプリ ---
-# --- メインアプリ ---
 def main_app():
-    # 1. まずログイン情報などのヘッダーを表示（ここは共通）
     c1, c2 = st.columns([8, 2])
     with c2:
         badge = "orange" if st.session_state.user_plan == "Pro" else "gray"
@@ -277,26 +273,185 @@ def main_app():
         if st.button("ログアウト"): 
             st.session_state.logged_in = False; st.session_state.is_guest = False; st.rerun()
 
+    # ★ ユーザー設定のタイトルを維持
     st.title("📈 PaperGraph Studio")
-    if st.session_state.is_guest: st.info("👀 ゲストモード中: 設定の保存機能などは制限されています。")
+    
+    # ゲストモードの通知
+    if st.session_state.is_guest: 
+        st.info("👀 ゲストモード中: 設定の保存機能などは制限されています。")
 
-    # ★★★ ここからが変更点！タブを作る ★★★
+    # ★ タブで画面を分割
     tab_graph, tab_manual = st.tabs(["📊 グラフ作成", "📖 使い方ガイド"])
 
-    # --- タブ1：今までの機能 ---
+    # --- タブ1：グラフ作成機能 (ここに全部入れる！) ---
     with tab_graph:
-        # 今までのコードを全部この中に入れます（インデントを下げる）
         uploaded_files = st.file_uploader("CSVをドロップ (複数可)", type="csv", accept_multiple_files=True)
 
         if uploaded_files:
             try:
-                # ... (中略：既存のグラフ作成ロジックはずっとこのまま) ...
-                # ... 最後の zipダウンロードの行まで ...
-                pass # (※ここは実際のコードでは不要です)
+                dfs = {f.name: pd.read_csv(f) for f in uploaded_files}
+                all_opts = []
+                for fn, df in dfs.items():
+                    for c in df.columns[1:]: all_opts.append({"file": fn, "column": c})
+
+                # サイドバー設定
+                if not st.session_state.is_guest:
+                    st.sidebar.header("☁️ 設定の読み込み")
+                    saved_names = get_cloud_config_names(st.session_state.user_email)
+                    if saved_names:
+                        s_saved = st.sidebar.selectbox("保存済み設定", ["-- 選択 --"] + saved_names)
+                        if s_saved != "-- 選択 --" and st.sidebar.button("読み込む"):
+                            st.session_state.loaded_config = load_config_cloud(st.session_state.user_email, s_saved)
+                            st.success(f"読み込み完了: {s_saved}"); st.rerun()
+                    st.sidebar.markdown("---")
+
+                st.sidebar.header("🎨 グラフ構築")
+                st.sidebar.caption("👇 ここで選んだデータで見た目を調整してください")
+                sel_idx = []
+                for i, opt in enumerate(all_opts):
+                    if st.sidebar.checkbox(f"{opt['column']} ({opt['file']})", value=(i==0), key=f"c_{i}"): sel_idx.append(i)
+                
+                # 自動設定
+                auto_xn, auto_xu = "t", "s"; auto_y1n, auto_y1u = "V", "V"
+                if sel_idx:
+                    to = all_opts[sel_idx[0]]; tdf = dfs[to['file']]
+                    auto_xn, auto_xu = parse_header(tdf.columns[0])
+                    auto_y1n, auto_y1u = parse_header(to['column'])
+
+                with st.sidebar.expander("🖼️ 原点・スケール・サイズ", expanded=True):
+                    fw = st.slider("横幅", 50, 200, get_conf("fig_w_mm", 120))
+                    fh = st.slider("縦幅", 50, 200, get_conf("fig_h_mm", 80))
+                    uo = st.checkbox("原点一本化", value=get_conf("unify_origin", False))
+                    ox = st.slider("調整X", -15.0, 5.0, get_conf("origin_x_mm", -3.5), step=0.1)
+                    oy = st.slider("調整Y", -15.0, 5.0, get_conf("origin_y_mm", -1.5), step=0.1)
+                    st_type = st.selectbox("スケール", ["Linear", "Semi-log X", "Semi-log Y", "Log-Log"], index=0)
+                    current_config.update({"fig_w_mm": fw, "fig_h_mm": fh, "unify_origin": uo, "origin_x_mm": ox, "origin_y_mm": oy, "scale_type": st_type})
+
+                with st.sidebar.expander("📍 ラベル・枠・凡例"):
+                    xn = st.text_input("X記号", value=get_conf("x_name", auto_xn))
+                    xu = st.text_input("X単位", value=get_conf("x_unit", auto_xu))
+                    y1n = st.text_input("左Y記号", value=get_conf("y1_name", auto_y1n))
+                    y1u = st.text_input("左Y単位", value=get_conf("y1_unit", auto_y1u))
+                    use_dual = st.checkbox("2軸を使用", get_conf("use_dual_axis", False))
+                    y2n = st.text_input("右Y記号", get_conf("y2_name", "I")) if use_dual else "I"
+                    y2u = st.text_input("右Y単位", get_conf("y2_unit", "A")) if use_dual else "A"
+                    
+                    c_lk1, c_lk2 = st.columns(2)
+                    fl = c_lk1.slider("ラベル", 6, 24, get_conf("f_size_lab", 11))
+                    ft = c_lk2.slider("目盛り", 6, 24, get_conf("f_size_tick", 10))
+                    
+                    c_x, c_yl, c_yr = st.columns(3)
+                    sxt = c_x.checkbox("X軸線", get_conf("show_xt", True)); sxl = c_x.checkbox("X数字", get_conf("show_xl", True))
+                    sytl = c_yl.checkbox("左Y線", get_conf("show_ytl", True)); syll = c_yl.checkbox("左Y数字", get_conf("show_yll", True))
+                    sytr = c_yr.checkbox("右Y線", get_conf("show_ytr", True)) if use_dual else True; sylr = c_yr.checkbox("右Y数字", get_conf("show_ylr", True)) if use_dual else True
+                    
+                    sl = st.checkbox("凡例表示", get_conf("show_legend", True))
+                    lx = st.slider("LX", -0.5, 1.5, get_conf("leg_x", 1.0))
+                    ly = st.slider("LY", -0.5, 1.5, get_conf("leg_y", 1.0))
+                    tp = st.slider("離隔", 0.0, 10.0, get_conf("tick_pad", 3.5))
+
+                    current_config.update({"x_name": xn, "x_unit": xu, "y1_name": y1n, "y1_unit": y1u, "y2_name": y2n, "y2_unit": y2u, "use_dual_axis": use_dual, "f_size_lab": fl, "f_size_tick": ft, "show_legend": sl, "leg_x": lx, "leg_y": ly, "axis_width": 0.71, "tick_pad": tp, "show_xt": sxt, "show_xl": sxl, "show_ytl": sytl, "show_yll": syll, "show_ytr": sytr, "show_ylr": sylr})
+
+                with st.sidebar.expander("📏 グリッド・目盛り密度"):
+                    c1, c2 = st.columns(2)
+                    smj = c1.checkbox("主グリッド", get_conf("show_major", False)); mja = c1.slider("主線濃さ", 0.1, 1.0, get_conf("major_alpha", 0.3))
+                    smn = c2.checkbox("補助グリッド", get_conf("show_minor", False)); mna = c2.slider("補助線濃さ", 0.1, 1.0, get_conf("minor_alpha", 0.15))
+                    nx = st.slider("X主目盛り", 2, 20, get_conf("nbins_x", 6)); ny = st.slider("Y主目盛り", 2, 20, get_conf("nbins_y", 6))
+                    mx = st.slider("X補助分割", 1, 10, get_conf("minor_div_x", 2)); my = st.slider("Y補助分割", 1, 10, get_conf("minor_div_y", 2))
+                    current_config.update({"show_major": smj, "major_alpha": mja, "show_minor": smn, "minor_alpha": mna, "nbins_x": nx, "nbins_y": ny, "minor_div_x": mx, "minor_div_y": my})
+
+                with st.sidebar.expander("💾 保存・画質設定"):
+                    save_format = st.selectbox("形式", ["png", "pdf", "svg"], index=0)
+                    max_dpi = 600 if st.session_state.user_plan == "Pro" else 300
+                    save_dpi = st.slider("DPI (画質)", 100, max_dpi, 300, step=50)
+                    if st.session_state.user_plan != "Pro":
+                        st.caption("🔒 300dpi以上の高画質出力はProプラン限定")
+
+                st.sidebar.header("🖊️ 線の詳細設定")
+                line_configs = []; last_s = {}
+                for idx in sel_idx:
+                    o = all_opts[idx]; fname, colname = o["file"], o["column"]; target_df = dfs[fname]
+                    with st.sidebar.expander(f"{colname} ({fname})"):
+                        ax_sel = st.radio("軸", ["左", "右"], horizontal=True, key=f"a_{idx}") if use_dual else "左"
+                        col = st.color_picker("色", key=f"co_{idx}")
+                        lbl = st.text_input("凡例名", colname, key=f"l_{idx}")
+                        
+                        c_sl, c_sm, c_se = st.columns(3)
+                        sl_b = c_sl.checkbox("線", True, key=f"sl_{idx}")
+                        sm_b = c_sm.checkbox("プロット", False, key=f"sm_{idx}")
+                        se_b = c_se.checkbox("誤差", False, key=f"se_{idx}")
+
+                        ls = st.selectbox("線種", list(LINE_STYLE_MAP.keys()), key=f"ls_{idx}") if sl_b else "None"
+                        mk = st.selectbox("記号", list(MARKER_OPTIONS.keys()), key=f"mk_{idx}") if sm_b else "None"
+                        
+                        lw = st.slider("太さ", 0.1, 5.0, 1.1, key=f"lw_{idx}"); ms = st.slider("サイズ", 1.0, 20.0, 6.0, key=f"ms_{idx}")
+                        pm = st.selectbox("処理", ["なし", "移動平均", "スプライン補間"], key=f"pm_{idx}")
+                        pp = st.slider("Param", 2, 500, 5, key=f"pp_{idx}") if pm != "なし" else 0
+                        
+                        fit = st.checkbox("近似直線", False, key=f"fit_{idx}")
+                        sr2 = st.checkbox("R2", True, key=f"r2_{idx}") if fit else False
+                        rp = (st.slider("RX", 0.0,1.0,0.05,key=f"rx_{idx}"), st.slider("RY", 0.0,1.0,0.9,key=f"ry_{idx}")) if sr2 else (0,0)
+                        
+                        ed = target_df.iloc[:, st.selectbox("ErrCol", range(1, len(target_df.columns)), key=f"ec_{idx}")] if se_b else None
+
+                        conf = {"x": target_df.iloc[:, 0], "y": target_df[colname], "axis": "left" if ax_sel=="左" else "right", 
+                                "color": col, "label": lbl, 
+                                "linestyle": LINE_STYLE_MAP.get(ls,"None") if sl_b else "None", 
+                                "marker": MARKER_OPTIONS.get(mk,{}).get("fmt") if sm_b else "None", 
+                                "m_info": MARKER_OPTIONS.get(mk), "lw": lw, "m_size": ms, 
+                                "proc_mode": pm, "proc_param": pp, "fit": fit, "show_r2": sr2, "r2_pos": rp, 
+                                "show_err": se_b, "err_data": ed}
+                        line_configs.append(conf); last_s = conf.copy()
+
+                # --- 保存ボタンエリア (Pro限定) ---
+                st.sidebar.markdown("---")
+                st.sidebar.header("☁️ クラウドに保存")
+                
+                if st.session_state.user_plan == "Pro":
+                    new_config_name = st.sidebar.text_input("現在の設定に名前をつけて保存", placeholder="例: 卒論用グラフ")
+                    if st.sidebar.button("クラウドに保存"):
+                        if new_config_name:
+                            if save_config_cloud(st.session_state.user_email, new_config_name, current_config):
+                                st.success(f"保存しました: {new_config_name}"); st.rerun()
+                        else: st.warning("名前を入力してください")
+                else:
+                    st.sidebar.info("🔒 設定のクラウド保存はProプラン限定機能です。")
+                    if not st.session_state.is_guest:
+                        st.sidebar.markdown(f"[💳 Proプランにアップグレード]({STRIPE_LINK})")
+
+                # --- プレビュー ---
+                st.subheader("📊 プレビュー")
+                if line_configs:
+                    fig = create_figure(line_configs, current_config)
+                    st.pyplot(fig)
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format=save_format, dpi=save_dpi, bbox_inches='tight')
+                    st.download_button(f"💾 画像を保存 ({save_format})", buf.getvalue(), f"graph.{save_format}")
+
+                # --- バッチ処理 (Pro限定) ---
+                st.markdown("---"); st.subheader("📦 バッチ出力 (一括作成)")
+                if st.session_state.user_plan == "Pro":
+                    b_col = st.number_input("列番号", 1, value=1)
+                    if st.button("🚀 ZIPダウンロード"):
+                        z_buf = io.BytesIO(); prog = st.progress(0)
+                        with zipfile.ZipFile(z_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                            tot = len(dfs)
+                            for i, (fn, df) in enumerate(dfs.items()):
+                                prog.progress((i+1)/tot)
+                                if len(df.columns) <= b_col: continue
+                                bc = last_s.copy() if last_s else {}
+                                bc.update({"x": df.iloc[:,0], "y": df.iloc[:,b_col], "label": fn})
+                                fb = create_figure([bc], current_config)
+                                im = io.BytesIO(); fb.savefig(im, format=save_format, dpi=save_dpi, bbox_inches='tight'); plt.close(fb)
+                                zf.writestr(f"graph_{fn}.{save_format}", im.getvalue())
+                        st.download_button("📦 ZIP保存", z_buf.getvalue(), "graphs.zip", mime="application/zip")
+                else:
+                    st.markdown(f"""<div class="locked-box"><h3>🔒 Proプラン限定</h3><a href="{STRIPE_LINK}" target="_blank"><button style="background-color:#6772E5;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;">💳 Proへアップグレード</button></a></div>""", unsafe_allow_html=True)
+
             except Exception as e: st.error(f"Error: {e}")
         else: st.info("CSVファイルをドロップしてください。")
 
-    # --- タブ2：新しく作るマニュアル ---
+    # --- タブ2：使い方マニュアル ---
     with tab_manual:
         st.markdown("""
         ### 🚀 クイックスタートガイド
@@ -333,178 +488,6 @@ def main_app():
         * **クラウド保存**: 自分の設定を無制限に保存。
         * **バッチ出力**: 複数のCSVファイルを一括で画像変換。
         """)
-    if st.session_state.is_guest: st.info("👀 ゲストモード中: 設定の保存機能などは制限されています。")
-
-    uploaded_files = st.file_uploader("CSVをドロップ (複数可)", type="csv", accept_multiple_files=True)
-
-    if uploaded_files:
-        try:
-            dfs = {f.name: pd.read_csv(f) for f in uploaded_files}
-            all_opts = []
-            for fn, df in dfs.items():
-                for c in df.columns[1:]: all_opts.append({"file": fn, "column": c})
-
-            # --- サイドバー: 読み込み ---
-            if not st.session_state.is_guest:
-                st.sidebar.header("☁️ 設定の読み込み")
-                saved_names = get_cloud_config_names(st.session_state.user_email)
-                if saved_names:
-                    s_saved = st.sidebar.selectbox("保存済み設定", ["-- 選択 --"] + saved_names)
-                    if s_saved != "-- 選択 --" and st.sidebar.button("読み込む"):
-                        st.session_state.loaded_config = load_config_cloud(st.session_state.user_email, s_saved)
-                        st.success(f"読み込み完了: {s_saved}"); st.rerun()
-                st.sidebar.markdown("---")
-
-            st.sidebar.header("🎨 グラフ構築")
-            st.sidebar.caption("👇 ここで選んだデータで見た目を調整してください") # ★復活！
-            sel_idx = []
-            for i, opt in enumerate(all_opts):
-                if st.sidebar.checkbox(f"{opt['column']} ({opt['file']})", value=(i==0), key=f"c_{i}"): sel_idx.append(i)
-            
-            # (自動設定ロジック)
-            auto_xn, auto_xu = "t", "s"; auto_y1n, auto_y1u = "V", "V"
-            if sel_idx:
-                to = all_opts[sel_idx[0]]; tdf = dfs[to['file']]
-                auto_xn, auto_xu = parse_header(tdf.columns[0])
-                auto_y1n, auto_y1u = parse_header(to['column'])
-
-            with st.sidebar.expander("🖼️ 原点・スケール・サイズ", expanded=True):
-                fw = st.slider("横幅", 50, 200, get_conf("fig_w_mm", 120))
-                fh = st.slider("縦幅", 50, 200, get_conf("fig_h_mm", 80))
-                uo = st.checkbox("原点一本化", value=get_conf("unify_origin", False))
-                ox = st.slider("調整X", -15.0, 5.0, get_conf("origin_x_mm", -3.5), step=0.1)
-                oy = st.slider("調整Y", -15.0, 5.0, get_conf("origin_y_mm", -1.5), step=0.1)
-                st_type = st.selectbox("スケール", ["Linear", "Semi-log X", "Semi-log Y", "Log-Log"], index=0)
-                current_config.update({"fig_w_mm": fw, "fig_h_mm": fh, "unify_origin": uo, "origin_x_mm": ox, "origin_y_mm": oy, "scale_type": st_type})
-
-            with st.sidebar.expander("📍 ラベル・枠・凡例"):
-                xn = st.text_input("X記号", value=get_conf("x_name", auto_xn))
-                xu = st.text_input("X単位", value=get_conf("x_unit", auto_xu))
-                y1n = st.text_input("左Y記号", value=get_conf("y1_name", auto_y1n))
-                y1u = st.text_input("左Y単位", value=get_conf("y1_unit", auto_y1u))
-                use_dual = st.checkbox("2軸を使用", get_conf("use_dual_axis", False))
-                y2n = st.text_input("右Y記号", get_conf("y2_name", "I")) if use_dual else "I"
-                y2u = st.text_input("右Y単位", get_conf("y2_unit", "A")) if use_dual else "A"
-                
-                c_lk1, c_lk2 = st.columns(2)
-                fl = c_lk1.slider("ラベル", 6, 24, get_conf("f_size_lab", 11))
-                ft = c_lk2.slider("目盛り", 6, 24, get_conf("f_size_tick", 10))
-                
-                c_x, c_yl, c_yr = st.columns(3)
-                sxt = c_x.checkbox("X軸線", get_conf("show_xt", True)); sxl = c_x.checkbox("X数字", get_conf("show_xl", True))
-                sytl = c_yl.checkbox("左Y線", get_conf("show_ytl", True)); syll = c_yl.checkbox("左Y数字", get_conf("show_yll", True))
-                sytr = c_yr.checkbox("右Y線", get_conf("show_ytr", True)) if use_dual else True; sylr = c_yr.checkbox("右Y数字", get_conf("show_ylr", True)) if use_dual else True
-                
-                sl = st.checkbox("凡例表示", get_conf("show_legend", True))
-                lx = st.slider("LX", -0.5, 1.5, get_conf("leg_x", 1.0))
-                ly = st.slider("LY", -0.5, 1.5, get_conf("leg_y", 1.0))
-                tp = st.slider("離隔", 0.0, 10.0, get_conf("tick_pad", 3.5))
-
-                current_config.update({"x_name": xn, "x_unit": xu, "y1_name": y1n, "y1_unit": y1u, "y2_name": y2n, "y2_unit": y2u, "use_dual_axis": use_dual, "f_size_lab": fl, "f_size_tick": ft, "show_legend": sl, "leg_x": lx, "leg_y": ly, "axis_width": 0.71, "tick_pad": tp, "show_xt": sxt, "show_xl": sxl, "show_ytl": sytl, "show_yll": syll, "show_ytr": sytr, "show_ylr": sylr})
-
-            with st.sidebar.expander("📏 グリッド・目盛り密度"):
-                c1, c2 = st.columns(2)
-                smj = c1.checkbox("主グリッド", get_conf("show_major", False)); mja = c1.slider("主線濃さ", 0.1, 1.0, get_conf("major_alpha", 0.3))
-                smn = c2.checkbox("補助グリッド", get_conf("show_minor", False)); mna = c2.slider("補助線濃さ", 0.1, 1.0, get_conf("minor_alpha", 0.15))
-                nx = st.slider("X主目盛り", 2, 20, get_conf("nbins_x", 6)); ny = st.slider("Y主目盛り", 2, 20, get_conf("nbins_y", 6))
-                mx = st.slider("X補助分割", 1, 10, get_conf("minor_div_x", 2)); my = st.slider("Y補助分割", 1, 10, get_conf("minor_div_y", 2))
-                current_config.update({"show_major": smj, "major_alpha": mja, "show_minor": smn, "minor_alpha": mna, "nbins_x": nx, "nbins_y": ny, "minor_div_x": mx, "minor_div_y": my})
-
-            with st.sidebar.expander("💾 保存・画質設定"):
-                save_format = st.selectbox("形式", ["png", "pdf", "svg"], index=0)
-                
-                # ★ ここで画質制限！(DPI)
-                max_dpi = 600 if st.session_state.user_plan == "Pro" else 300
-                save_dpi = st.slider("DPI (画質)", 100, max_dpi, 300, step=50)
-                if st.session_state.user_plan != "Pro":
-                    st.caption("🔒 300dpi以上の高画質出力はProプラン限定")
-
-            st.sidebar.header("🖊️ 線の詳細設定")
-            line_configs = []; last_s = {}
-            for idx in sel_idx:
-                o = all_opts[idx]; fname, colname = o["file"], o["column"]; target_df = dfs[fname]
-                with st.sidebar.expander(f"{colname} ({fname})"): # ★復活！詳細設定UI
-                    ax_sel = st.radio("軸", ["左", "右"], horizontal=True, key=f"a_{idx}") if use_dual else "左"
-                    col = st.color_picker("色", key=f"co_{idx}")
-                    lbl = st.text_input("凡例名", colname, key=f"l_{idx}")
-                    
-                    c_sl, c_sm, c_se = st.columns(3)
-                    sl_b = c_sl.checkbox("線", True, key=f"sl_{idx}")
-                    sm_b = c_sm.checkbox("プロット", False, key=f"sm_{idx}")
-                    se_b = c_se.checkbox("誤差", False, key=f"se_{idx}")
-
-                    ls = st.selectbox("線種", list(LINE_STYLE_MAP.keys()), key=f"ls_{idx}") if sl_b else "None"
-                    mk = st.selectbox("記号", list(MARKER_OPTIONS.keys()), key=f"mk_{idx}") if sm_b else "None"
-                    
-                    lw = st.slider("太さ", 0.1, 5.0, 1.1, key=f"lw_{idx}"); ms = st.slider("サイズ", 1.0, 20.0, 6.0, key=f"ms_{idx}")
-                    pm = st.selectbox("処理", ["なし", "移動平均", "スプライン補間"], key=f"pm_{idx}")
-                    pp = st.slider("Param", 2, 500, 5, key=f"pp_{idx}") if pm != "なし" else 0
-                    
-                    fit = st.checkbox("近似直線", False, key=f"fit_{idx}")
-                    sr2 = st.checkbox("R2", True, key=f"r2_{idx}") if fit else False
-                    rp = (st.slider("RX", 0.0,1.0,0.05,key=f"rx_{idx}"), st.slider("RY", 0.0,1.0,0.9,key=f"ry_{idx}")) if sr2 else (0,0)
-                    
-                    ed = target_df.iloc[:, st.selectbox("ErrCol", range(1, len(target_df.columns)), key=f"ec_{idx}")] if se_b else None
-
-                    # 設定辞書を作成
-                    conf = {"x": target_df.iloc[:, 0], "y": target_df[colname], "axis": "left" if ax_sel=="左" else "right", 
-                            "color": col, "label": lbl, 
-                            "linestyle": LINE_STYLE_MAP.get(ls,"None") if sl_b else "None", 
-                            "marker": MARKER_OPTIONS.get(mk,{}).get("fmt") if sm_b else "None", 
-                            "m_info": MARKER_OPTIONS.get(mk), "lw": lw, "m_size": ms, 
-                            "proc_mode": pm, "proc_param": pp, "fit": fit, "show_r2": sr2, "r2_pos": rp, 
-                            "show_err": se_b, "err_data": ed}
-                    line_configs.append(conf); last_s = conf.copy()
-
-            # --- 保存ボタンエリア (Pro限定) ---
-            st.sidebar.markdown("---")
-            st.sidebar.header("☁️ クラウドに保存")
-            
-            # ★ここでProプラン制限！
-            if st.session_state.user_plan == "Pro":
-                new_config_name = st.sidebar.text_input("現在の設定に名前をつけて保存", placeholder="例: 卒論用グラフ")
-                if st.sidebar.button("クラウドに保存"):
-                    if new_config_name:
-                        if save_config_cloud(st.session_state.user_email, new_config_name, current_config):
-                            st.success(f"保存しました: {new_config_name}"); st.rerun()
-                    else: st.warning("名前を入力してください")
-            else:
-                # 無料会員向け表示
-                st.sidebar.info("🔒 設定のクラウド保存はProプラン限定機能です。")
-                if not st.session_state.is_guest:
-                    st.sidebar.markdown(f"[💳 Proプランにアップグレード]({STRIPE_LINK})")
-
-            # --- プレビュー ---
-            st.subheader("📊 プレビュー")
-            if line_configs:
-                fig = create_figure(line_configs, current_config)
-                st.pyplot(fig)
-                buf = io.BytesIO()
-                fig.savefig(buf, format=save_format, dpi=save_dpi, bbox_inches='tight')
-                st.download_button(f"💾 画像を保存 ({save_format})", buf.getvalue(), f"graph.{save_format}")
-
-            # --- バッチ処理 (Pro限定) ---
-            st.markdown("---"); st.subheader("📦 バッチ出力 (一括作成)")
-            if st.session_state.user_plan == "Pro":
-                b_col = st.number_input("列番号", 1, value=1)
-                if st.button("🚀 ZIPダウンロード"):
-                    z_buf = io.BytesIO(); prog = st.progress(0)
-                    with zipfile.ZipFile(z_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                        tot = len(dfs)
-                        for i, (fn, df) in enumerate(dfs.items()):
-                            prog.progress((i+1)/tot)
-                            if len(df.columns) <= b_col: continue
-                            bc = last_s.copy() if last_s else {}
-                            bc.update({"x": df.iloc[:,0], "y": df.iloc[:,b_col], "label": fn})
-                            fb = create_figure([bc], current_config)
-                            im = io.BytesIO(); fb.savefig(im, format=save_format, dpi=save_dpi, bbox_inches='tight'); plt.close(fb)
-                            zf.writestr(f"graph_{fn}.{save_format}", im.getvalue())
-                    st.download_button("📦 ZIP保存", z_buf.getvalue(), "graphs.zip", mime="application/zip")
-            else:
-                st.markdown(f"""<div class="locked-box"><h3>🔒 Proプラン限定</h3><a href="{STRIPE_LINK}" target="_blank"><button style="background-color:#6772E5;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;">💳 Proへアップグレード</button></a></div>""", unsafe_allow_html=True)
-
-        except Exception as e: st.error(f"Error: {e}")
-    else: st.info("CSVファイルをドロップしてください。")
 
 if not st.session_state.logged_in: show_login_page()
 else: main_app()
