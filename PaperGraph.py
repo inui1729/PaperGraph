@@ -461,9 +461,10 @@ def main_app():
         
         **Step 1: データの準備**
         CSVファイルを用意します。
+        """)
         st.image("sample_data.png", caption="ExcelでのCSVデータ作成例", use_container_width=True)
         
-        st.markdown(
+        st.markdown("""
         * **1列目**: X軸のデータ（時間 $t$ など）
         * **2列目以降**: Y軸のデータ（電圧 $V$、電流 $I$ など）
         
